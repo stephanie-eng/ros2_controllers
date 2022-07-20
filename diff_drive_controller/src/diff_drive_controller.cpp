@@ -58,49 +58,68 @@ controller_interface::CallbackReturn DiffDriveController::on_init()
   try
   {
     // with the lifecycle node being initialized, we can declare parameters
-    auto_declare<std::vector<std::string>>("left_wheel_names", std::vector<std::string>());
-    auto_declare<std::vector<std::string>>("right_wheel_names", std::vector<std::string>());
+    left_wheel_names_ =
+      auto_declare<std::vector<std::string>>("left_wheel_names", std::vector<std::string>());
+    right_wheel_names_ =
+      auto_declare<std::vector<std::string>>("right_wheel_names", std::vector<std::string>());
 
-    auto_declare<double>("wheel_separation", wheel_params_.separation);
-    auto_declare<int>("wheels_per_side", wheel_params_.wheels_per_side);
-    auto_declare<double>("wheel_radius", wheel_params_.radius);
-    auto_declare<double>("wheel_separation_multiplier", wheel_params_.separation_multiplier);
-    auto_declare<double>("left_wheel_radius_multiplier", wheel_params_.left_radius_multiplier);
-    auto_declare<double>("right_wheel_radius_multiplier", wheel_params_.right_radius_multiplier);
+    wheel_params_.separation = auto_declare<double>("wheel_separation", wheel_params_.separation);
+    wheel_params_.wheels_per_side =
+      auto_declare<int>("wheels_per_side", wheel_params_.wheels_per_side);
+    wheel_params_.radius = auto_declare<double>("wheel_radius", wheel_params_.radius);
+    wheel_params_.separation_multiplier =
+      auto_declare<double>("wheel_separation_multiplier", wheel_params_.separation_multiplier);
+    wheel_params_.left_radius_multiplier =
+      auto_declare<double>("left_wheel_radius_multiplier", wheel_params_.left_radius_multiplier);
+    wheel_params_.right_radius_multiplier =
+      auto_declare<double>("right_wheel_radius_multiplier", wheel_params_.right_radius_multiplier);
 
-    auto_declare<std::string>("odom_frame_id", odom_params_.odom_frame_id);
-    auto_declare<std::string>("base_frame_id", odom_params_.base_frame_id);
-    auto_declare<std::vector<double>>("pose_covariance_diagonal", std::vector<double>());
-    auto_declare<std::vector<double>>("twist_covariance_diagonal", std::vector<double>());
-    auto_declare<bool>("open_loop", odom_params_.open_loop);
-    auto_declare<bool>("position_feedback", odom_params_.position_feedback);
-    auto_declare<bool>("enable_odom_tf", odom_params_.enable_odom_tf);
+    odom_params_.odom_frame_id =
+      auto_declare<std::string>("odom_frame_id", odom_params_.odom_frame_id);
+    odom_params_.base_frame_id =
+      auto_declare<std::string>("base_frame_id", odom_params_.base_frame_id);
+    auto pose_diagonal =
+      auto_declare<std::vector<double>>("pose_covariance_diagonal", std::vector<double>());
+    std::copy(
+      pose_diagonal.begin(), pose_diagonal.end(), odom_params_.pose_covariance_diagonal.begin());
+    auto twist_diagonal =
+      auto_declare<std::vector<double>>("twist_covariance_diagonal", std::vector<double>());
+    std::copy(
+      twist_diagonal.begin(), twist_diagonal.end(), odom_params_.twist_covariance_diagonal.begin());
+    odom_params_.open_loop = auto_declare<bool>("open_loop", odom_params_.open_loop);
+    odom_params_.position_feedback =
+      auto_declare<bool>("position_feedback", odom_params_.position_feedback);
+    odom_params_.position_feedback =
+      auto_declare<bool>("enable_odom_tf", odom_params_.enable_odom_tf);
+    cmd_vel_timeout_ = std::chrono::duration_cast<std::chrono::milliseconds>(
+      auto_declare<double>("cmd_vel_timeout", cmd_vel_timeout_.count() / 1000.0) * 1000ms);
+    publish_limited_velocity_ =
+      auto_declare<bool>("publish_limited_velocity", publish_limited_velocity_);
+    odometry_.setVelocityRollingWindowSize(auto_declare<int>("velocity_rolling_window_size", 10));
+    use_stamped_vel_ = auto_declare<bool>("use_stamped_vel", use_stamped_vel_);
 
-    auto_declare<double>("cmd_vel_timeout", cmd_vel_timeout_.count() / 1000.0);
-    auto_declare<bool>("publish_limited_velocity", publish_limited_velocity_);
-    auto_declare<int>("velocity_rolling_window_size", 10);
-    auto_declare<bool>("use_stamped_vel", use_stamped_vel_);
+    limiter_linear_ = SpeedLimiter(
+      auto_declare<bool>("linear.x.has_velocity_limits", false),
+      auto_declare<bool>("linear.x.has_acceleration_limits", false),
+      auto_declare<bool>("linear.x.has_jerk_limits", false),
+      auto_declare<double>("linear.x.min_velocity", NAN),
+      auto_declare<double>("linear.x.max_velocity", NAN),
+      auto_declare<double>("linear.x.min_acceleration", NAN),
+      auto_declare<double>("linear.x.max_acceleration", NAN),
+      auto_declare<double>("linear.x.min_jerk", NAN),
+      auto_declare<double>("linear.x.max_jerk", NAN));
 
-    auto_declare<bool>("linear.x.has_velocity_limits", false);
-    auto_declare<bool>("linear.x.has_acceleration_limits", false);
-    auto_declare<bool>("linear.x.has_jerk_limits", false);
-    auto_declare<double>("linear.x.max_velocity", NAN);
-    auto_declare<double>("linear.x.min_velocity", NAN);
-    auto_declare<double>("linear.x.max_acceleration", NAN);
-    auto_declare<double>("linear.x.min_acceleration", NAN);
-    auto_declare<double>("linear.x.max_jerk", NAN);
-    auto_declare<double>("linear.x.min_jerk", NAN);
-
-    auto_declare<bool>("angular.z.has_velocity_limits", false);
-    auto_declare<bool>("angular.z.has_acceleration_limits", false);
-    auto_declare<bool>("angular.z.has_jerk_limits", false);
-    auto_declare<double>("angular.z.max_velocity", NAN);
-    auto_declare<double>("angular.z.min_velocity", NAN);
-    auto_declare<double>("angular.z.max_acceleration", NAN);
-    auto_declare<double>("angular.z.min_acceleration", NAN);
-    auto_declare<double>("angular.z.max_jerk", NAN);
-    auto_declare<double>("angular.z.min_jerk", NAN);
-    auto_declare<double>("publish_rate", publish_rate_);
+    limiter_angular_ = SpeedLimiter(
+      auto_declare<bool>("angular.z.has_velocity_limits", false),
+      auto_declare<bool>("angular.z.has_acceleration_limits", false),
+      auto_declare<bool>("angular.z.has_jerk_limits", false),
+      auto_declare<double>("angular.z.min_velocity", NAN),
+      auto_declare<double>("angular.z.max_velocity", NAN),
+      auto_declare<double>("angular.z.min_acceleration", NAN),
+      auto_declare<double>("angular.z.max_acceleration", NAN),
+      auto_declare<double>("angular.z.min_jerk", NAN),
+      auto_declare<double>("angular.z.max_jerk", NAN));
+    publish_rate_ = auto_declare<double>("publish_rate", publish_rate_);
   }
   catch (const std::exception & e)
   {
